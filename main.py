@@ -1,96 +1,68 @@
-"""Ship the finished front page to the make.fun output folder.
+"""Front-page delivery for the 19 November news-image entry.
 
-The artwork itself lives next to this script as ``entry.png``.  This
-module's only job is to place an exact copy of that file where the
-judge expects it and then prove the copy is a usable PNG: right
-magic bytes, small enough, and no bigger than the allowed canvas.
-Everything here is plain standard library, and nothing about the
-run depends on the clock or the network, so repeated runs produce
-identical bytes.
+The finished page already exists in this folder as entry.png. This
+small program only carries those exact bytes to the folder the
+platform asks for, then reads the copy back and checks it matches,
+so the picture that gets submitted is bit-for-bit the one we built.
 """
 
-import os
+import pathlib
 import struct
-import sys
-from pathlib import Path
 
-# The eight bytes every PNG file starts with.
-PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
-
-# Limits from the competition kit, in bytes and pixels.
-BYTE_LIMIT = 1_048_576
-EDGE_LIMIT = 1024
+PNG_MARK = b"\x89PNG\r\n\x1a\n"
+MAX_BYTES = 1_048_576
+MAX_SIDE = 1024
+HEADER_LEN = 24
 
 
-def fail(reason):
-    """Report a problem on stderr and stop with a failing status."""
-    print(f"entrypoint failed: {reason}", file=sys.stderr)
-    return 1
+def front_page_path():
+    """Where the finished picture lives, next to this program."""
+    return pathlib.Path(__file__).resolve().parent / "entry.png"
 
 
-def canvas_size(blob):
-    """Pull (width, height) out of a PNG's IHDR chunk.
-
-    The chunk layout is fixed: an 8-byte signature, then a 4-byte
-    length, the four letters ``IHDR``, and then width and height as
-    two big-endian unsigned 32-bit numbers.
-    """
-    if len(blob) < 24:
-        raise ValueError("file is too short to hold a PNG header")
-    if blob[12:16] != b"IHDR":
-        raise ValueError("first chunk is not IHDR, not a normal PNG")
-    wide, tall = struct.unpack(">II", blob[16:24])
-    return wide, tall
+def output_folder():
+    """Folder named by the platform, falling back to ./out."""
+    wanted = pathlib.os.environ.get("MAKEFUN_OUTPUT_DIR") or "out"
+    return pathlib.Path(wanted)
 
 
-def run():
-    here = Path(__file__).resolve().parent
-    artwork = here / "entry.png"
+def check_picture(payload):
+    """Refuse anything that is not a small, well-formed PNG."""
+    if not payload.startswith(PNG_MARK):
+        raise SystemExit("error: entry.png does not start with the PNG signature")
+    if len(payload) > MAX_BYTES:
+        raise SystemExit(f"error: entry.png is {len(payload)} bytes, over the 1048576 byte limit")
+    if len(payload) < HEADER_LEN or payload[12:16] != b"IHDR":
+        raise SystemExit("error: entry.png has no IHDR chunk where one belongs")
+    width, height = struct.unpack(">II", payload[16:24])
+    if width == 0 or height == 0:
+        raise SystemExit("error: entry.png has a zero dimension")
+    if width > MAX_SIDE or height > MAX_SIDE:
+        raise SystemExit(f"error: entry.png is {width}x{height}, over the 1024x1024 limit")
 
-    target_dir = Path(os.environ.get("MAKEFUN_OUTPUT_DIR", "out"))
-    target_dir.mkdir(parents=True, exist_ok=True)
-    destination = target_dir / "entry.png"
 
+def deliver():
+    """Copy the picture, verify the copy, and confirm in one line."""
+    origin = front_page_path()
     try:
-        picture_bytes = artwork.read_bytes()
-    except OSError as exc:
-        return fail(f"could not read {artwork}: {exc}")
-
+        payload = origin.read_bytes()
+    except FileNotFoundError:
+        raise SystemExit("error: entry.png is missing beside main.py") from None
+    except OSError as trouble:
+        raise SystemExit(f"error: cannot read entry.png: {trouble}") from None
+    check_picture(payload)
+    folder = output_folder()
     try:
-        destination.write_bytes(picture_bytes)
-    except OSError as exc:
-        return fail(f"could not write {destination}: {exc}")
-
-    try:
-        delivered = destination.read_bytes()
-    except OSError as exc:
-        return fail(f"could not read back {destination}: {exc}")
-
-    if delivered != picture_bytes:
-        return fail("output bytes differ from the source artwork")
-
-    if len(delivered) > BYTE_LIMIT:
-        return fail(
-            f"output is {len(delivered)} bytes, over the "
-            f"{BYTE_LIMIT} byte limit"
-        )
-
-    if delivered[:8] != PNG_MAGIC:
-        return fail("output does not start with the PNG signature")
-
-    try:
-        wide, tall = canvas_size(delivered)
-    except ValueError as exc:
-        return fail(str(exc))
-
-    if wide > EDGE_LIMIT or tall > EDGE_LIMIT:
-        return fail(
-            f"canvas is {wide}x{tall}, over the {EDGE_LIMIT}x{EDGE_LIMIT} limit"
-        )
-
-    print(f"Wrote {destination} ({len(delivered)} bytes)")
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / "entry.png"
+        target.write_bytes(payload)
+        echoed = target.read_bytes()
+    except OSError as trouble:
+        raise SystemExit(f"error: cannot write output: {trouble}") from None
+    if echoed != payload:
+        raise SystemExit("error: output bytes do not match entry.png")
+    print(f"Wrote {target} ({len(payload)} bytes)")
     return 0
 
 
-if __name__ == "__main__":
-    raise SystemExit(run())
+raise SystemExit(deliver())
