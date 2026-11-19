@@ -6,6 +6,7 @@ platform asks for, then reads the copy back and checks it matches,
 so the picture that gets submitted is bit-for-bit the one we built.
 """
 
+import os
 import pathlib
 import struct
 
@@ -22,7 +23,7 @@ def front_page_path():
 
 def output_folder():
     """Folder named by the platform, falling back to ./out."""
-    wanted = pathlib.os.environ.get("MAKEFUN_OUTPUT_DIR") or "out"
+    wanted = os.environ.get("MAKEFUN_OUTPUT_DIR") or "out"
     return pathlib.Path(wanted)
 
 
